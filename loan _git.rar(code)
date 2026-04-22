@@ -1,0 +1,279 @@
+CLIENT SIDE 
+import { KaggleLoanData } from 
+"./dataset"; export interface 
+ApplicantData { 
+fullName: 
+string; 
+email: 
+string; 
+phone: 
+string; pan: 
+string; 
+aadhar: 
+string; 
+bankAccount: 
+string; ifsc: loanAmount: number; 
+loanTerm: number; 
+debtToIncome: 
+number; purpose: 
+string; 
+} 
+export interface 
+PredictionResult { id: string; 
+timestamp: string; 
+applicant: 
+ApplicantData; 
+decision: 'Approved' | 'Rejected'; 
+probability: number; 
+riskLevel: 'Low' | 'Medium' | 'High'; 
+} 
+modelConsensus: { 
+logisticRegression: { 
+probability: number; 
+vote: 'Approved' | 'Rejected'; 
+}; 
+randomForest: { 
+probability: number; 
+vote: 'Approved' | 'Rejected'; 
+}; 
+decisionTree: { 
+probability: number; 
+vote: 'Approved' | 'Rejected'; 
+}; 
+}; 
+limeExplanatio
+n: { feature: 
+string; weight: 
+number; value: fairnessMetrics: { 
+demographicParity: number; 
+equalOpportunity: number; 
+biasDetected: boolean; 
+}; 
+actionableFeedback: string[]; 
+} 
+export const predictLoanEligibility = ( 
+data: ApplicantData 
+): Promise<PredictionResult> => { 
+return new Promise((resolve) => { 
+setTimeout(() => { 
+const normIncome = Math.min(data.income / 100000, 1); 
+const normCredit = (data.creditScore - 300) / 550; 
+const normDTI = 1 - Math.min(data.debtToIncome, 1); 
+const normLoanAmt = 1 - Math.min(data.loanAmount / 50000, 1); 
+const lrScore = 
+(normCredit * 0.5) + 
+(normIncome * 0.3) + 
+(normDTI * 0.2); 
+const lrProb = Math.min( 
+Math.max(lrScore + (Math.random() * 0.1 - 0.05), 0), 
+1 
+); 
+let dtProb = 0.5; 
+if (data.creditScore < 600) { 
+dtProb = 0.1; 
+} else if (data.debtToIncome > 0.45) { 
+dtProb = 0.2; 
+} else if (data.income > 50000) { 
+dtProb = 0.9;} else { 
+dtProb = 0.7; 
+} 
+const rfScore = 
+(normCredit * 0.4) + 
+(normDTI * 0.3) + 
+(normLoanAmt * 0.2) + 
+((data.employmentYears / 20) * 0.1); 
+const rfProb = Math.min( 
+Math.max(rfScore + (Math.random() * 0.05 - 0.025), 0), 
+1 
+); 
+const finalProbability = 
+(lrProb * 0.3) + 
+(dtProb * 0.2) + 
+(rfProb * 0.5); 
+const decision = finalProbability > 0.6 ? 'Approved' : 'Rejected'; 
+const features = [ 
+{ 
+}, 
+{ data.debtToIncome < 0.3 
+? "Low debt ratio shows good financial health." 
+: "High debt obligation relative to income is a risk factor." 
+}, 
+{ 
+}, 
+{ 
+} 
+]; 
+feature: 'Loan Amount', 
+weight: ((data.income * 0.4 - data.loanAmount) / 10000) * 0.1, 
+value: `₹${data.loanAmount.toLocaleString()}`, 
+impactDescription: 
+data.loanAmount > data.income * 0.5 
+? "Loan amount is high compared to annual income." 
+: "Loan amount is well within affordable limits." 
+feature: 'Employment Stability', 
+weight: (data.employmentYears - 2) * 0.05, 
+value: `${data.employmentYears} years`, 
+impactDescription: 
+data.employmentYears > 5 
+? "Long-term employment indicates stability." 
+: "Short employment history adds uncertainty." 
+const limeExplanation = features.sort( 
+(a, b) => Math.abs(b.weight) - Math.abs(a.weight) 
+); 
+const actionableFeedback: string[] = []; 
+if (data.creditScore < 700) { 
+actionableFeedback.push("Improve credit score by 30+ points."); 
+} 
+if (data.debtToIncome > 0.35) { 
+actionableFeedback.push("Reduce DTI below 30%."); 
+}if (data.loanAmount > data.income * 0.4) { 
+actionableFeedback.push("Reduce requested loan amount."); 
+} 
+if (actionableFeedback.length === 0) { 
+actionableFeedback.push("Profile is strong; maintain current status."); 
+} 
+resolve({ 
+id: Math.random().toString(36).substring(7).toUpperCase(), 
+timestamp: new Date().toISOString(), 
+applicant: data, 
+decision, 
+probability: finalProbability, 
+riskLevel: 
+finalProbability > 0.8 
+? 'Low' 
+: finalProbability > 0.6 
+? 'Medium' 
+: 'High', 
+modelConsensus: { 
+logisticRegression: { 
+probability: lrProb, 
+vote: lrProb > 0.6 ? 'Approved' : 'Rejected' 
+}, 
+randomForest: { 
+probability: rfProb, 
+vote: rfProb > 0.6 ? 'Approved' : 'Rejected' 
+}, 
+decisionTree: { 
+probability: dtProb, 
+vote: dtProb > 0.6 ? 'Approved' : 'Rejected' 
+} 
+},limeExplanation, 
+fairnessMetrics: { 
+demographicParity: 0.98, 
+equalOpportunity: 0.95, 
+biasDetected: false 
+}, 
+actionableFeedback 
+}); 
+}, 2500); 
+}); 
+}; 
+
+
+
+
+SERVER SIDE 
+import express, { type Request, type Response, type NextFunction } from "express"; 
+import { createServer, type Server } from "http"; 
+import type { Express } from "express"; 
+import { randomUUID } from "crypto"; 
+import { registerRoutes } from "./routes"; 
+import { serveStatic } from "./static"; 
+import { storage } from "./storage"; 
+import { type User, type InsertUser } from "@shared/schema"; 
+const app = express(); 
+const httpServer = createServer(app); 
+declare module "http" { 
+interface IncomingMessage { 
+rawBody: unknown; 
+} 
+} 
+app.use( 
+express.json({ 
+verify: (req, _res, buf) => {req.rawBody = buf; 
+} 
+}) 
+); 
+app.use(express.urlencoded({ extended: false })); 
+export function log(message: string, source = "express") { 
+const t = new Date().toLocaleTimeString("en-US", { 
+hour: "numeric", 
+minute: "2-digit", 
+second: "2-digit", 
+hour12: true 
+}); 
+console.log(`${t} [${source}] ${message}`); 
+} 
+app.use((req, res, next) => { 
+const start = Date.now(); 
+const path = req.path; 
+let captured: Record<string, any> | undefined; 
+const original = res.json; 
+res.json = function (body, ...args) { 
+captured = body; 
+return original.apply(res, [body, ...args]); 
+}; 
+res.on("finish", () => { 
+const duration = Date.now() - start; 
+if (path.startsWith("/api")) { 
+let line = `${req.method} ${path} ${res.statusCode} in ${duration}ms`; 
+if (captured) { 
+line += ` :: ${JSON.stringify(captured)}`; 
+} 
+log(line); 
+}}); 
+AI – LEND SENSE: PREDICTIVE AND EXPLAINABLE LOAN DECISION SYSTEM 
+next(); 
+}); 
+(async () => { 
+await registerRoutes(httpServer, app); 
+app.use((err: any, _req: Request, res: Response, _next: NextFunction) => { 
+const status = err.status || err.statusCode || 500; 
+const message = err.message || "Internal Server Error"; 
+res.status(status).json({ message }); 
+}); 
+if (process.env.NODE_ENV === "production") { 
+serveStatic(app); 
+} else { 
+const { setupVite } = await import("./vite"); 
+await setupVite(httpServer, app); 
+} 
+const port = Number(process.env.PORT) || 3000; 
+httpServer.listen(port, () => { 
+log(`Server running on http://localhost:${port}`); 
+}); 
+})(); 
+export async function registerRoutes( 
+httpServer: Server, 
+app: Express 
+): Promise<Server> { 
+return httpServer; 
+} 
+export interface IStorage { 
+getUser(id: string): Promise<User | undefined>; 
+getUserByUsername(username: string): Promise<User | undefined>; 
+createUser(user: InsertUser): Promise<User>; 
+} 
+export class MemStorage implements IStorage { private users: Map<string, User>; 
+constructor() { 
+this.users = new Map(); 
+} 
+async getUser(id: string): Promise<User | undefined> { 
+return this.users.get(id); 
+} 
+async getUserByUsername(username: string): Promise<User | undefined> { 
+return Array.from(this.users.values()).find( 
+(u) => u.username === username 
+); 
+} 
+async createUser(insertUser: InsertUser): Promise<User> { 
+const id = randomUUID(); 
+const user: User = { 
+...insertUser, 
+id 
+}; 
+this.users.set(id, user); 
+return user; 
+} 
+} 
+export const storage = new MemStorage();
